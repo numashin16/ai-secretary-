@@ -64,7 +64,13 @@ def parse_with_ai(message: str) -> dict:
             }
         ],
     )
-    return json.loads(response.content[0].text)
+    text = response.content[0].text.strip()
+    # コードブロックが含まれている場合は除去
+    if "```" in text:
+        text = text.split("```")[1]
+        if text.startswith("json"):
+            text = text[4:]
+    return json.loads(text.strip())
 
 
 def add_event(info: dict) -> str:
