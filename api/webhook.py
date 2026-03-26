@@ -127,7 +127,7 @@ def handle_message_logic(user_message: str) -> str:
         return f"エラーが発生しました\n{str(e)}"
 
 
-class Handler(BaseHTTPRequestHandler):
+class handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if self.path != "/api/webhook":
             self.send_response(404)
