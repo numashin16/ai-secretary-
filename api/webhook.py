@@ -10,9 +10,16 @@ import os
 from datetime import datetime, timedelta
 
 
-line_bot_api = LineBotApi(os.environ["LINE_CHANNEL_ACCESS_TOKEN"])
-handler = WebhookHandler(os.environ["LINE_CHANNEL_SECRET"])
-claude = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+def get_line_bot_api():
+    return LineBotApi(os.environ["LINE_CHANNEL_ACCESS_TOKEN"])
+
+
+def get_line_handler():
+    return WebhookHandler(os.environ["LINE_CHANNEL_SECRET"])
+
+
+def get_claude():
+    return anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
 
 def get_calendar_service():
@@ -28,6 +35,7 @@ def get_calendar_service():
 
 def parse_with_ai(message: str) -> dict:
     today = datetime.now().strftime("%Y-%m-%d")
+    claude = get_claude()
     response = claude.messages.create(
         model="claude-haiku-4-5-20251001",
         max_tokens=512,
@@ -49,7 +57,7 @@ def parse_with_ai(message: str) -> dict:
 
 ルール:
 - actionが「add」: 予定の登録
-- actionが「list」: 予定の確認（今日・明日・特定日）
+- actionが「list」: 予定の確認
 - titleは簡潔に整理する
 - 終了時間が不明な場合はnull
 - 情報不足でaddできない場合はunknown""",
@@ -107,7 +115,7 @@ def list_events(date: str) -> str:
     return "\n".join(lines)
 
 
-def handle_message_logic(user_message: str) -> str:
+def process_message(user_message: str) -> str:
     try:
         info = parse_with_ai(user_message)
         action = info.get("action")
@@ -129,24 +137,22 @@ def handle_message_logic(user_message: str) -> str:
 
 class handler(BaseHTTPRequestHandler):
     def do_POST(self):
-        if self.path != "/api/webhook":
-            self.send_response(404)
-            self.end_headers()
-            return
-
         content_length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(content_length).decode("utf-8")
         signature = self.headers.get("X-Line-Signature", "")
 
+        line_handler = get_line_handler()
+        line_bot_api = get_line_bot_api()
+
         try:
-            @handler.add(MessageEvent, message=TextMessage)
+            @line_handler.add(MessageEvent, message=TextMessage)
             def handle_message(event):
-                reply = handle_message_logic(event.message.text)
+                reply = process_message(event.message.text)
                 line_bot_api.reply_message(
                     event.reply_token, TextSendMessage(text=reply)
                 )
 
-            handler.handle(body, signature)
+            line_handler.handle(body, signature)
             self.send_response(200)
             self.end_headers()
             self.wfile.write(b"OK")
