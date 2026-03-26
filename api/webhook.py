@@ -96,6 +96,52 @@ def add_event(info: dict) -> str:
     return f"登録しました！\n\n{info['title']}\n{info['date']} {start_time}〜{end_time}"
 
 
+def delete_event(info: dict) -> str:
+    service = get_calendar_service()
+    date = info.get("date") or datetime.now().strftime("%Y-%m-%d")
+    events_result = (
+        service.events()
+        .list(
+            calendarId="primary",
+            timeMin=f"{date}T00:00:00+09:00",
+            timeMax=f"{date}T23:59:59+09:00",
+            singleEvents=True,
+            orderBy="startTime",
+        )
+        .execute()
+    )
+    events = events_result.get("items", [])
+    if not events:
+        return f"{date}に削除できる予定がありません。"
+
+    # タイトルまたは時間で一致する予定を検索
+    title = info.get("title", "")
+    start_time = info.get("start_time", "")
+    target = None
+    for e in events:
+        summary = e.get("summary", "")
+        start = e["start"].get("dateTime", "")
+        event_time = start[11:16] if "T" in start else ""
+        if title and title in summary:
+            target = e
+            break
+        if start_time and event_time == start_time:
+            target = e
+            break
+
+    if not target:
+        # 一致しない場合は候補を表示
+        lines = [f"{date}の予定一覧（削除したい予定を「〇〇を削除して」と送ってください）"]
+        for e in events:
+            start = e["start"].get("dateTime", e["start"].get("date"))
+            time_str = start[11:16] if "T" in start else "終日"
+            lines.append(f"・{time_str} {e['summary']}")
+        return "\n".join(lines)
+
+    service.events().delete(calendarId="primary", eventId=target["id"]).execute()
+    return f"削除しました！\n\n{target['summary']}"
+
+
 def list_events(date: str) -> str:
     service = get_calendar_service()
     events_result = (
@@ -131,6 +177,8 @@ def process_message(user_message: str) -> str:
         elif action == "list":
             date = info.get("date") or datetime.now().strftime("%Y-%m-%d")
             return list_events(date)
+        elif action == "delete":
+            return delete_event(info)
         else:
             return (
                 "こんな感じで送ってください！\n\n"
