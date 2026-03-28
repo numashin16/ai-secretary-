@@ -8,6 +8,12 @@ import anthropic
 import json
 import os
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+
+JST = ZoneInfo("Asia/Tokyo")
+
+def now_jst():
+    return datetime.now(JST)
 
 
 def get_line_bot_api():
@@ -34,7 +40,7 @@ def get_calendar_service():
 
 
 def parse_with_ai(message: str) -> dict:
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = now_jst().strftime("%Y-%m-%d")
     claude = get_claude()
     response = claude.messages.create(
         model="claude-haiku-4-5-20251001",
@@ -98,7 +104,7 @@ def add_event(info: dict) -> str:
 
 def delete_event(info: dict) -> str:
     service = get_calendar_service()
-    date = info.get("date") or datetime.now().strftime("%Y-%m-%d")
+    date = info.get("date") or now_jst().strftime("%Y-%m-%d")
     events_result = (
         service.events()
         .list(
@@ -175,7 +181,7 @@ def process_message(user_message: str) -> str:
         if action == "add" and info.get("title") and info.get("date") and info.get("start_time"):
             return add_event(info)
         elif action == "list":
-            date = info.get("date") or datetime.now().strftime("%Y-%m-%d")
+            date = info.get("date") or now_jst().strftime("%Y-%m-%d")
             return list_events(date)
         elif action == "delete":
             return delete_event(info)
