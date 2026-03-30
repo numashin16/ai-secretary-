@@ -71,7 +71,8 @@ def parse_with_ai(message: str) -> dict:
   "action": "add_event" | "list_events" | "delete_event" | "add_task" | "list_tasks" | "complete_task" | "unknown",
   "title": "タイトル（簡潔に）",
   "date": "YYYY-MM-DD",
-  "start_time": "HH:MM",
+  "all_day": true | false,
+  "start_time": "HH:MM or null",
   "end_time": "HH:MM or null",
   "description": "補足情報",
   "due": "YYYY-MM-DD or null（タスクの期限）"
@@ -85,6 +86,7 @@ def parse_with_ai(message: str) -> dict:
 - list_tasks: タスクの一覧（「タスク確認」「やること一覧」など）
 - complete_task: タスクの完了（「〇〇完了」「〇〇終わった」など）
 - titleは簡潔に整理する
+- 時間の指定がない場合はall_day=true、start_time=null
 - 終了時間・期限が不明な場合はnull
 - 情報不足な場合はunknown""",
             }
@@ -102,38 +104,48 @@ def parse_with_ai(message: str) -> dict:
 
 def add_event(info: dict) -> str:
     service = get_calendar_service()
-    start_time = info["start_time"]
-    end_time = info.get("end_time") or (
-        datetime.strptime(start_time, "%H:%M") + timedelta(hours=1)
-    ).strftime("%H:%M")
+    date = info["date"]
+    title = info["title"]
+    description = info.get("description", "")
+    all_day = info.get("all_day") or not info.get("start_time")
 
-    event = {
-        "summary": info["title"],
-        "description": info.get("description", ""),
-        "start": {
-            "dateTime": f"{info['date']}T{start_time}:00+09:00",
-            "timeZone": "Asia/Tokyo",
-        },
-        "end": {
-            "dateTime": f"{info['date']}T{end_time}:00+09:00",
-            "timeZone": "Asia/Tokyo",
-        },
-    }
-    service.events().insert(calendarId="primary", body=event).execute()
+    if all_day:
+        event = {
+            "summary": title,
+            "description": description,
+            "start": {"date": date},
+            "end": {"date": date},
+        }
+        service.events().insert(calendarId="primary", body=event).execute()
+        sync_event_to_notion(title, date, None, None, description)
+        return f"登録しました！\n\n{title}\n{date}（終日）"
+    else:
+        start_time = info["start_time"]
+        end_time = info.get("end_time") or (
+            datetime.strptime(start_time, "%H:%M") + timedelta(hours=1)
+        ).strftime("%H:%M")
+        event = {
+            "summary": title,
+            "description": description,
+            "start": {"dateTime": f"{date}T{start_time}:00+09:00", "timeZone": "Asia/Tokyo"},
+            "end": {"dateTime": f"{date}T{end_time}:00+09:00", "timeZone": "Asia/Tokyo"},
+        }
+        service.events().insert(calendarId="primary", body=event).execute()
+        sync_event_to_notion(title, date, start_time, end_time, description)
+        return f"登録しました！\n\n{title}\n{date} {start_time}〜{end_time}"
 
-    # Notionにも同期
-    sync_event_to_notion(info["title"], info["date"], start_time, end_time, info.get("description", ""))
 
-    return f"登録しました！\n\n{info['title']}\n{info['date']} {start_time}〜{end_time}"
-
-
-def sync_event_to_notion(title: str, date: str, start_time: str, end_time: str, description: str):
+def sync_event_to_notion(title: str, date: str, start_time, end_time, description: str):
     notion = get_notion()
+    if start_time:
+        date_prop = {"start": f"{date}T{start_time}:00+09:00", "end": f"{date}T{end_time}:00+09:00"}
+    else:
+        date_prop = {"start": date}
     notion.pages.create(
         parent={"database_id": NOTION_CALENDAR_DB},
         properties={
             "Name": {"title": [{"text": {"content": title}}]},
-            "Date": {"date": {"start": f"{date}T{start_time}:00+09:00", "end": f"{date}T{end_time}:00+09:00"}},
+            "Date": {"date": date_prop},
             "Description": {"rich_text": [{"text": {"content": description}}]},
         },
     )
@@ -367,7 +379,7 @@ def process_message(user_message: str) -> str:
         info = parse_with_ai(user_message)
         action = info.get("action")
 
-        if action == "add_event" and info.get("title") and info.get("date") and info.get("start_time"):
+        if action == "add_event" and info.get("title") and info.get("date"):
             return add_event(info)
         elif action == "list_events":
             date = info.get("date") or now_jst().strftime("%Y-%m-%d")
